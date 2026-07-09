@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "darkpool": {
+      "command": "backend/.venv/Scripts/python.exe",
+      "args": ["-m", "app.mcp.server"],
+      "env": { "PYTHONPATH": "backend" }
+    }
+  }
+}

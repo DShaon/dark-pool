@@ -1,0 +1,58 @@
+# DARKPOOL model roster (ADR-0004 / ADR-0012).
+# Config over code: swap any seat's provider/model here — zero code changes.
+# Keys are NEVER stored here; `key_setting` names a Settings field fed by env.
+#
+# All three providers speak the OpenAI chat-completions dialect:
+#   groq        https://console.groq.com          (free: ~1k req/day)
+#   openrouter  https://openrouter.ai             (free: 50/day, 1k with $10 topup)
+#   gemini      https://aistudio.google.com       (free: Flash ~1.5k req/day)
+
+providers:
+  groq:
+    base_url: https://api.groq.com/openai/v1
+    key_setting: groq_api_key
+  openrouter:
+    base_url: https://openrouter.ai/api/v1
+    key_setting: openrouter_api_key
+  gemini:
+    base_url: https://generativelanguage.googleapis.com/v1beta/openai
+    key_setting: gemini_api_key
+
+# P1 Quick Read — single fast analyst pass over the Market Brief.
+# Alternatives (swap `provider` + `model` lines):
+#   openrouter: meta-llama/llama-3.3-70b-instruct:free
+#   gemini:     gemini-2.5-flash
+# Groq/Llama is the default: fast, reliable, and its free quota is roomy.
+# Bangla comes out serviceable (a touch literal). For markedly more natural
+# Bangla, switch to Gemini Flash when its free quota is available — note
+# gemini-2.5-flash is a THINKING model, so give it max_tokens >= 3000 or its
+# reasoning eats the budget and truncates the JSON; gemini-2.0-flash needs no
+# bump. Alternatives (swap `provider` + `model`):
+#   gemini:     gemini-2.0-flash        (best Bangla, ~1.5k free req/day)
+#   openrouter: meta-llama/llama-3.3-70b-instruct:free
+quick_read:
+  provider: groq
+  model: llama-3.3-70b-versatile
+  temperature: 0.3
+  max_tokens: 1200
+  json_mode: true
+
+# ── P2 Full Desk — mandate analysts (ADR-0005) ──
+# Same brief, four different jobs → disagreement by construction. Which model
+# fills a seat is config; mandate diversity matters more than model diversity.
+# Spread across providers where free quota allows so one rate limit can't sink
+# the panel; a seat that fails validation twice or errors is DROPPED and the run
+# continues as long as >= min_survivors remain (graceful degradation, NFR-3).
+# (Today groq is the most reliable free tier, so it holds 3 seats; rebalance
+# here — zero code — as gemini/openrouter quota frees up.)
+analysts:
+  min_survivors: 3
+  defaults:
+    temperature: 0.4
+    max_tokens: 1100
+    json_mode: true
+  seats:
+    trend: { provider: groq, model: llama-3.3-70b-versatile }
+    contrarian: { provider: openrouter, model: meta-llama/llama-3.3-70b-instruct:free }
+    derivatives: { provider: gemini, model: gemini-2.0-flash }
+    risk: { provider: openrouter, model: meta-llama/llama-3.3-70b-instruct:free }

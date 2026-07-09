@@ -1,0 +1,16 @@
+fastapi>=0.115,<1.0
+uvicorn[standard]>=0.30
+httpx>=0.27
+pydantic>=2.8
+pydantic-settings>=2.4
+PyYAML>=6.0
+# MCP server (ADR-0006) — the interactive-CIO seam. Pulls rpds-py/cryptography,
+# but all ship prebuilt Windows + Linux-aarch64 wheels (no compiler at install,
+# unlike TA-Lib) so the dev/deploy parity rule (§F6) holds.
+mcp>=1.2
+# Background scanner (P3 · FR-5) — pure Python, no compiled deps (§F6 parity).
+APScheduler>=3.10,<4.0
+# Live kline stream (P3) — the upstream Binance WS client (app/adapters/binance_ws.py).
+# Was transitive via uvicorn[standard]; declared explicitly since it's now a
+# first-class dependency, not just uvicorn's own WS support. Pure Python.
+websockets>=13.0

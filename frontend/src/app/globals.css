@@ -1,0 +1,532 @@
+@import "tailwindcss";
+
+/* ── DARKPOOL tokens (MASTER_PLAN PART C · ADR-0010/0011) ────────────────────
+   Market data = obsidian monochrome + teal/red semantics.
+   AI judgment  = gold, always and only.
+   Banned: purple gradients, glassmorphism, drop shadows, bounces, spinners.  */
+:root {
+  --bg-void: #05070b;
+  --bg-abyss: #07090d;
+  --bg-panel: #0d1117;
+  --bg-raised: #131a23;
+  --line-hair: #1c2532;
+  --text-hi: #eef2f8;
+  /* mid/dim lifted for comfort — the old values (#93a0b4 / #5a6778) read as
+     too faint for important labels on the obsidian ground (user feedback). */
+  --text-mid: #aeb9cb;
+  --text-dim: #7c8698;
+  --bull: #2dd4bf;
+  --bear: #f87171;
+  --warn: #f5b94a;
+  --ai-gold: #e8c574;
+  --pulse: #7dd3fc;
+}
+
+@theme inline {
+  --color-abyss: var(--bg-abyss);
+  --color-panel: var(--bg-panel);
+  --color-raised: var(--bg-raised);
+  --color-hair: var(--line-hair);
+  --color-hi: var(--text-hi);
+  --color-mid: var(--text-mid);
+  --color-dim: var(--text-dim);
+  --color-bull: var(--bull);
+  --color-bear: var(--bear);
+  --color-warn: var(--warn);
+  --color-gold: var(--ai-gold);
+  --color-pulse: var(--pulse);
+
+  --font-sans: var(--font-space-grotesk), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+  --font-serif: var(--font-space-grotesk), ui-sans-serif, sans-serif;
+}
+
+/* ── Atmosphere: layered void — ambience, engineering grid, vignette ──────── */
+body {
+  color: var(--text-hi);
+  font-family: var(--font-space-grotesk), ui-sans-serif, system-ui, sans-serif;
+  font-feature-settings: "tnum" 1;
+  letter-spacing: -0.006em;
+  background-color: var(--bg-void);
+  position: relative;
+}
+/* The atmosphere lives on its own fixed, independently-composited layer instead
+   of `background-attachment: fixed` on the scrolling body — that classic
+   pattern forces the browser to repaint this multi-gradient background on
+   every scroll frame (the #1 cause of page-wide scroll jank). A real
+   position:fixed layer is composited once and never repainted on scroll;
+   the visual result is identical. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    radial-gradient(1100px 520px at 12% -8%, rgba(45, 212, 191, 0.055), transparent 62%),
+    radial-gradient(900px 460px at 92% 112%, rgba(232, 197, 116, 0.045), transparent 62%),
+    radial-gradient(1400px 900px at 50% 50%, rgba(9, 12, 18, 0), rgba(4, 6, 9, 0.55) 100%),
+    linear-gradient(rgba(147, 160, 180, 0.024) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(147, 160, 180, 0.024) 1px, transparent 1px);
+  background-size: 100% 100%, 100% 100%, 100% 100%, 44px 44px, 44px 44px;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--ai-gold) 25%, transparent);
+}
+
+/* Windows default scrollbars destroy the illusion — machine them */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-hair) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--bg-raised);
+  border: 3px solid transparent;
+  border-radius: 8px;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ── Type utilities ─────────────────────────────────────────────────────── */
+.micro-label {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+/* ── Card: machined edge — gradient hairline + top highlight, never shadow ── */
+.card {
+  position: relative;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #0e141c 0%, #0a0f16 100%);
+  border: 1px solid rgba(28, 37, 50, 0.9);
+}
+.card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(
+    180deg,
+    rgba(233, 238, 244, 0.09),
+    rgba(233, 238, 244, 0.015) 32%,
+    transparent 65%
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+/* HUD corner ticks — the chart stage's signature ornament */
+.hud-corners::after {
+  content: "";
+  position: absolute;
+  inset: 9px;
+  pointer-events: none;
+  --tick: rgba(125, 211, 252, 0.28);
+  background:
+    linear-gradient(var(--tick), var(--tick)) left 0 top 0 / 14px 1px,
+    linear-gradient(var(--tick), var(--tick)) left 0 top 0 / 1px 14px,
+    linear-gradient(var(--tick), var(--tick)) right 0 top 0 / 14px 1px,
+    linear-gradient(var(--tick), var(--tick)) right 0 top 0 / 1px 14px,
+    linear-gradient(var(--tick), var(--tick)) left 0 bottom 0 / 14px 1px,
+    linear-gradient(var(--tick), var(--tick)) left 0 bottom 0 / 1px 14px,
+    linear-gradient(var(--tick), var(--tick)) right 0 bottom 0 / 14px 1px,
+    linear-gradient(var(--tick), var(--tick)) right 0 bottom 0 / 1px 14px;
+  background-repeat: no-repeat;
+}
+
+/* Ambient glow for LIVE DATA containers only (glow discipline) */
+.glow-live {
+  position: relative;
+}
+.glow-live::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  background: radial-gradient(55% 40% at 50% 0%, rgba(45, 212, 191, 0.055), transparent 70%);
+  pointer-events: none;
+}
+
+/* ── Hero tiles: one flooded semantic moment per view + slow light sheen ──── */
+.hero-long {
+  background: linear-gradient(180deg, rgba(45, 212, 191, 0.17), rgba(45, 212, 191, 0.03) 80%);
+  border-color: rgba(45, 212, 191, 0.38);
+}
+.hero-short {
+  background: linear-gradient(180deg, rgba(248, 113, 113, 0.17), rgba(248, 113, 113, 0.03) 80%);
+  border-color: rgba(248, 113, 113, 0.38);
+}
+.hero-sheen {
+  overflow: hidden;
+}
+.hero-sheen::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    115deg,
+    transparent 38%,
+    rgba(233, 238, 244, 0.055) 48%,
+    rgba(233, 238, 244, 0.02) 52%,
+    transparent 62%
+  );
+  transform: translateX(-130%);
+  animation: dp-sheen 7s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  pointer-events: none;
+}
+@keyframes dp-sheen {
+  0%, 55% { transform: translateX(-130%); }
+  85%, 100% { transform: translateX(130%); }
+}
+
+/* ── Motion primitives (transform/opacity only — C5 contract) ─────────────── */
+@keyframes dp-rise {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.dp-rise {
+  animation: dp-rise 560ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+@keyframes dp-digit-up {
+  from { opacity: 0; transform: translateY(0.32em); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes dp-digit-down {
+  from { opacity: 0; transform: translateY(-0.32em); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.digit {
+  display: inline-block;
+}
+.digit-up {
+  animation: dp-digit-up 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.digit-down {
+  animation: dp-digit-down 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* Live-data pulse dot */
+.live-dot {
+  position: relative;
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+}
+.live-dot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: inherit;
+  animation: dp-ping 2.2s cubic-bezier(0.2, 0.8, 0.2, 1) infinite;
+}
+@keyframes dp-ping {
+  0% { transform: scale(1); opacity: 0.55; }
+  70%, 100% { transform: scale(2.6); opacity: 0; }
+}
+
+/* Scan-line freshness sweep (signature #6) */
+@keyframes dp-sweep {
+  from { transform: translateX(-100%); opacity: 0.9; }
+  to { transform: translateX(100%); opacity: 0; }
+}
+.data-sweep::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--pulse), transparent);
+  animation: dp-sweep 300ms ease-out 1;
+  pointer-events: none;
+}
+
+/* Chips — small bordered data tags */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border: 1px solid var(--line-hair);
+  border-radius: 7px;
+  background: rgba(19, 26, 35, 0.55);
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 11px;
+  color: var(--text-mid);
+}
+
+/* Dot leader between label and value (zones list) */
+.leader {
+  flex: 1;
+  margin: 0 10px;
+  border-bottom: 1px dotted rgba(90, 103, 120, 0.4);
+  transform: translateY(-4px);
+}
+
+/* ── AI layer — judgment is always gold (ADR-0010) ─────────────────────────
+   The verdict card is the one place gold floods; everywhere else gold is a
+   hairline accent. Live AI output may glow (glow discipline, ADR-0011). */
+.card-ai {
+  border-color: rgba(232, 197, 116, 0.3);
+  background: linear-gradient(180deg, rgba(232, 197, 116, 0.05) 0%, #0a0f16 55%);
+}
+.card-ai::before {
+  background: linear-gradient(
+    180deg,
+    rgba(232, 197, 116, 0.28),
+    rgba(232, 197, 116, 0.04) 38%,
+    transparent 70%
+  );
+}
+.glow-ai::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  background: radial-gradient(55% 42% at 50% 0%, rgba(232, 197, 116, 0.075), transparent 70%);
+  pointer-events: none;
+}
+
+/* Verdict Reveal (signature #1) — letters converge from tracked-out to set;
+   transform/opacity only (per-letter translateX fakes the tracking collapse) */
+@keyframes dp-letter-in {
+  from { opacity: 0; transform: translateX(var(--lx, 0)); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.verdict-letter {
+  display: inline-block;
+  animation: dp-letter-in 860ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+@keyframes dp-flare {
+  from { opacity: 0; transform: translateY(7px) scale(0.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.mandate-flare {
+  animation: dp-flare 420ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+/* Confidence arc pours like metal: dashoffset eased over 900ms */
+.arc-pour {
+  transition: stroke-dashoffset 900ms cubic-bezier(0.3, 0.7, 0.2, 1);
+}
+
+/* Pipeline Map breathing (signature #2) — ±1.5% over 4s, static under r-m */
+@keyframes dp-breathe {
+  from { transform: scale(1); }
+  to { transform: scale(1.015); }
+}
+.dp-breathe {
+  animation: dp-breathe 4s ease-in-out infinite alternate;
+  transform-origin: center;
+}
+
+/* Desk Tape — entries slide in from above, newest first */
+@keyframes dp-tape-in {
+  from { opacity: 0; transform: translateY(-7px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.tape-in {
+  animation: dp-tape-in 320ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+/* Palette summon (signature #7) — expands from a hairline; stage recedes */
+@keyframes dp-palette-in {
+  from { opacity: 0; transform: translateY(-10px) scaleY(0.55); }
+  to { opacity: 1; transform: translateY(0) scaleY(1); }
+}
+.palette-panel {
+  transform-origin: top center;
+  animation: dp-palette-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+@keyframes dp-backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.palette-backdrop {
+  background: rgba(4, 6, 9, 0.62);
+  animation: dp-backdrop-in 160ms ease-out both;
+}
+.stage-recede {
+  transform: scale(0.992);
+  opacity: 0.96;
+}
+
+/* Full Desk overlay panel — rises in over the receded stage (opacity/transform) */
+.overlay-card {
+  animation: dp-rise 320ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.stage {
+  transition: transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 180ms ease-out;
+}
+
+/* DEMO tag — honesty marker for placeholder AI output (removed when P2 wires
+   the real desk) */
+.demo-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border: 1px solid rgba(232, 197, 116, 0.35);
+  border-radius: 5px;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  color: var(--ai-gold);
+  opacity: 0.85;
+}
+
+/* ── Bengali secondary voice ────────────────────────────────────────────── */
+.font-bn {
+  font-family: var(--font-noto-bengali), var(--font-space-grotesk), sans-serif;
+}
+/* Bengali subtitle beside/under a micro-label — readable, not a whisper.
+   inline-block so it stacks below a block label (honoring margin-top) yet can
+   still sit inline where there's room (signal strip, page titles). */
+.bn-sub {
+  display: inline-block;
+  font-family: var(--font-noto-bengali), sans-serif;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--text-mid);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* Glossary term trigger — dotted cyan underline signals "hover me to learn" */
+.term {
+  position: relative;
+  cursor: help;
+  border-bottom: 1px dotted rgba(125, 211, 252, 0.45);
+  outline: none;
+}
+.term:hover,
+.term:focus-visible {
+  border-bottom-color: var(--pulse);
+}
+/* Term trigger without the underline — for badges/chips that style themselves */
+.term-bare {
+  position: relative;
+  cursor: help;
+  outline: none;
+}
+
+/* Bilingual tooltip — React renders it in a <body> portal at position:fixed,
+   so it can NEVER be clipped by a scrolling rail or a transformed ancestor
+   (root-cause fix for the edge-clipping bug). JS clamps it inside the
+   viewport; the reveal is opacity-only (C5 contract). No shadow (banned) —
+   a machined hairline + lifted panel separates it from the content. */
+.term-tip-fx {
+  position: fixed;
+  z-index: 90;
+  width: 300px;
+  max-width: calc(100vw - 16px);
+  padding: 11px 13px;
+  border: 1px solid rgba(125, 211, 252, 0.22);
+  border-radius: 12px;
+  background: linear-gradient(180deg, #16202b 0%, #0c1016 100%);
+  text-align: left;
+  pointer-events: none;
+  animation: dp-fade 140ms ease-out both;
+}
+.term-tip-en {
+  display: block;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--pulse);
+}
+.term-tip-bn {
+  display: block;
+  margin-top: 5px;
+  font-family: var(--font-noto-bengali), sans-serif;
+  font-size: 13.5px;
+  font-weight: 500;
+  line-height: 1.45;
+  color: var(--text-hi);
+}
+.term-tip-desc {
+  display: block;
+  margin-top: 5px;
+  font-family: var(--font-noto-bengali), sans-serif;
+  font-size: 12.5px;
+  line-height: 1.62;
+  color: var(--text-mid);
+}
+@keyframes dp-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Desk viewport lock — the one-screen terminal feel, but ONLY when the
+   desk actually fits. Short viewports (laptops at 125–150% Windows scaling)
+   previously clipped the shelf/footer with overflow:hidden and no way to
+   reach them — now they scroll normally instead. */
+@media (min-width: 1024px) and (min-height: 920px) {
+  .desk-lock {
+    height: 100vh;
+    overflow: hidden;
+  }
+}
+
+/* Alert bloom (signature #8) — an amber hairline traces the panel's
+   perimeter once, then settles into a corner badge. Urgent, never modal. */
+@keyframes dp-bloom-trace {
+  0% { stroke-dashoffset: 100; opacity: 1; }
+  75% { opacity: 1; }
+  100% { stroke-dashoffset: 0; opacity: 0; }
+}
+.bloom-rect {
+  animation: dp-bloom-trace 1100ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+@keyframes dp-badge-in {
+  from { opacity: 0; transform: scale(0.6); }
+  to { opacity: 1; transform: scale(1); }
+}
+.alert-badge {
+  animation: dp-badge-in 260ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+/* Setup tiles — bordered cards stacked with gaps; brighten on hover (no lift) */
+.setup-tile {
+  transition: background-color 180ms ease-out, border-color 180ms ease-out;
+}
+.setup-tile:hover {
+  background: rgba(19, 26, 35, 0.55);
+  border-color: rgba(147, 160, 180, 0.32);
+}
+
+/* Watchlist tiles */
+.wl-tile {
+  transition: background-color 180ms ease-out, border-color 180ms ease-out;
+}
+.wl-tile:hover {
+  background: var(--bg-raised);
+}
+.wl-active {
+  border-color: rgba(125, 211, 252, 0.35);
+  background: rgba(19, 26, 35, 0.75);
+}
+
+/* Motion discipline: every signature has a static equivalent */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
