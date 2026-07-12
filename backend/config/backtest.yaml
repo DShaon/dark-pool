@@ -1,0 +1,20 @@
+# Backtest simulation constants (ADR-0020). Config over code (invariant 6) —
+# but every value here is a MONEY-RISK constant pinned by golden tests
+# (tests/test_backtest.py); changing one is a documented decision, not an edit.
+
+window_days_default: 30
+window_days_max: 90
+
+# Per-side taker fees by venue, in basis points (Binance standard tiers).
+# Funding costs for PERP holds are NOT modeled separately in v1 — the flat
+# slippage line absorbs them approximately (stated in every report).
+fees_bps_per_side:
+  PERP: 5.0
+  MARGIN: 10.0
+  SPOT: 10.0
+slippage_bps_per_side: 2.0
+
+monte_carlo:
+  iterations: 2000
+  seed: 7          # reported in the output; same seed + same trades = same result
+  min_trades: 10   # below this the MC is skipped with a stated reason (ADR-0018 spirit)

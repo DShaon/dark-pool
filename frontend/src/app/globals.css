@@ -425,6 +425,22 @@ body::before {
   outline: none;
 }
 
+/* Source-provenance badge (ADR-0017 §5) — the ⓘ on every data-bearing card.
+   Colour is set inline per kind (dim/teal/gold); reveal is opacity-only. */
+.source-badge {
+  cursor: help;
+  font-size: 10px;
+  line-height: 1;
+  opacity: 0.5;
+  transition: opacity 150ms ease;
+  outline: none;
+  user-select: none;
+}
+.source-badge:hover,
+.source-badge:focus-visible {
+  opacity: 1;
+}
+
 /* Bilingual tooltip — React renders it in a <body> portal at position:fixed,
    so it can NEVER be clipped by a scrolling rail or a transformed ancestor
    (root-cause fix for the edge-clipping bug). JS clamps it inside the

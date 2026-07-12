@@ -52,7 +52,44 @@ analysts:
     max_tokens: 1100
     json_mode: true
   seats:
+    # Free-tier quota field notes (2026-07-10, measured live — the brief is
+    # ~10k tokens/call, so budget accordingly):
+    #   groq llama-3.3-70b   100k tokens/DAY  -> ~8 desk runs/day, then 429
+    #   groq llama-3.1-8b    6k tokens/MINUTE -> one brief NEVER fits (413)
+    #   gemini-2.0-flash     per-day quota, resets midnight PT
+    #   gemini-2.5-flash     separate bucket, but THINKING model — needs
+    #                        max_tokens >= 5000 or the JSON truncates
+    #   openrouter :free     shared upstream, 429s under load
+    # All quotas are PER MODEL: rebalance seats here (zero code) when one
+    # bucket empties. Mandate diversity does the work (ADR-0005).
     trend: { provider: groq, model: llama-3.3-70b-versatile }
     contrarian: { provider: openrouter, model: meta-llama/llama-3.3-70b-instruct:free }
     derivatives: { provider: gemini, model: gemini-2.0-flash }
-    risk: { provider: openrouter, model: meta-llama/llama-3.3-70b-instruct:free }
+    risk: { provider: groq, model: llama-3.3-70b-versatile }
+
+# ── CIO synthesis — headless mode (ADR-0006 / ADR-0015) ──
+# Weighs the surviving panel into ONE TradePlan. Its numbers are guard-railed
+# in code against the panel's published levels; confidence/rr/sizing are
+# computed deterministically (ADR-0007) — so a mid-tier model is safe here,
+# and any OpenAI-dialect model can hold the seat (config, zero code).
+# The INTERACTIVE CIO (Claude Code / Fable over MCP) is unaffected by this
+# entry; this model runs background/API synthesis only. If synthesis fails
+# twice (or no key), the desk falls back to a deterministic plan — a run with
+# >= 2 surviving analysts always produces a plan.
+cio:
+  provider: groq
+  model: llama-3.3-70b-versatile
+  temperature: 0.2
+  max_tokens: 1600
+  json_mode: true
+
+# ── Scenario path — AI sequence mapper (ADR-0017 §2) ──
+# Picks WHICH real, already-computed levels the price visits and in what ORDER;
+# it never invents a number (every waypoint is a dot-path resolved in code).
+# A low-cost model is fine — the anti-forecast lock lives in code, not the model.
+scenario:
+  provider: groq
+  model: llama-3.3-70b-versatile
+  temperature: 0.4
+  max_tokens: 900
+  json_mode: true

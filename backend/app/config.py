@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     # Binance public market data (keyless mirror).
     binance_data_base: str = "https://data-api.binance.vision"
 
+    # Twelve Data forex OHLCV (P4). "demo" serves EUR/USD out of the box; a free
+    # lifetime key (twelvedata.com, 8 req/min · 800/day) unlocks every pair.
+    twelve_data_api_key: str = "demo"
+
     # Upstash Redis over REST (optional; in-memory fallback when unset).
     redis_rest_url: str | None = None
     redis_rest_token: str | None = None
@@ -50,15 +54,26 @@ class Settings(BaseSettings):
     models_config_path: str = str(BACKEND_DIR / "config" / "models.yaml")
     prompts_dir: str = str(BACKEND_DIR / "prompts")
     alerts_config_path: str = str(BACKEND_DIR / "config" / "alerts.yaml")
+    backtest_config_path: str = str(BACKEND_DIR / "config" / "backtest.yaml")
+    broker_config_path: str = str(BACKEND_DIR / "config" / "broker.yaml")
+    # User-managed roster (ADR-0016) — overlays models.yaml; holds API keys, so
+    # gitignored under data/ (invariant 4). Absent file = pure YAML defaults.
+    roster_config_path: str = str(BACKEND_DIR / "data" / "roster.json")
 
     # Local data (P1 file stores — CIO trade plans via MCP). Gitignored;
     # migrates to Supabase Postgres (B4) without changing call sites.
     data_dir: str = str(BACKEND_DIR / "data")
 
+    # Risk parameters for CIO position sizing (FR-4 · ADR-0015). Advisory
+    # percentages only — no execution paths exist in v1 (invariant 5).
+    risk_pct_per_trade: float = 1.0  # % of account risked if the stop is hit
+    max_position_pct: float = 100.0  # cap on recommended notional (100 = 1x)
+
     # Background scanner (P3 · FR-5). Active mode ticks this often; the seed
     # watchlist before the frontend has synced its own list at least once.
     scan_interval_seconds: int = 60
     default_watchlist: str = "BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,XRPUSDT"
+    default_forex_watchlist: str = "EURUSD,GBPUSD,USDJPY,AUDUSD"
 
     @property
     def cors_origins_list(self) -> list[str]:

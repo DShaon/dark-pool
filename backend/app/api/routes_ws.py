@@ -12,6 +12,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.adapters.binance import VALID_INTERVALS
 from app.config import get_settings
+from app.markets import is_forex
 
 router = APIRouter()
 
@@ -27,7 +28,10 @@ async def ws_kline(websocket: WebSocket, symbol: str, interval: str) -> None:
             return
 
     symbol = symbol.upper()
-    if not _SYMBOL_RE.match(symbol) or interval not in VALID_INTERVALS:
+    # Forex has no live stream here (Twelve Data WS is a paid feature) — the
+    # frontend polls REST for forex instead of opening this socket. Reject
+    # cleanly if one is opened anyway.
+    if not _SYMBOL_RE.match(symbol) or interval not in VALID_INTERVALS or is_forex(symbol):
         await websocket.close(code=4422)
         return
 

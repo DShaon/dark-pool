@@ -16,7 +16,11 @@ from app.adapters.base import AdapterError
 from app.adapters.binance import VALID_INTERVALS, BinanceAdapter
 from app.config import get_settings
 from app.core.cache import Cache
+from app.markets import is_forex
 from app.models.market import Candle, Ticker
+
+# Forex (Twelve Data) supports a subset of the crypto intervals.
+FOREX_INTERVALS = {"5m", "15m", "1h", "4h", "1d"}
 
 router = APIRouter()
 
@@ -24,6 +28,9 @@ _SYMBOL_RE = re.compile(r"^[A-Z0-9]{5,20}$")
 
 TICKER_TTL_SECONDS = 2
 KLINES_TTL_SECONDS = 10
+# Forex (Twelve Data free tier) is capped at 8 req/min — cache klines much
+# longer than crypto so the chart poll + watchlist tiles stay within budget.
+FOREX_KLINES_TTL_SECONDS = 90
 
 
 async def require_auth(request: Request) -> None:
@@ -93,7 +100,9 @@ async def klines(
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> list[Candle]:
     symbol = _validate_symbol(symbol)
-    if interval not in VALID_INTERVALS:
+    forex = is_forex(symbol)
+    valid = FOREX_INTERVALS if forex else VALID_INTERVALS
+    if interval not in valid:
         raise HTTPException(status_code=422, detail=f"invalid interval {interval!r}")
 
     cache = _cache(request)
@@ -103,10 +112,14 @@ async def klines(
     if cached is not None:
         return [Candle.model_validate(row) for row in cached]
 
+    adapter = request.app.state.forex if forex else _adapter(request)
     try:
-        candles = await _adapter(request).get_klines(symbol, interval=interval, limit=limit)
+        candles = await adapter.get_klines(symbol, interval=interval, limit=limit)
     except AdapterError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    await cache.set(key, [c.model_dump(mode="json") for c in candles], KLINES_TTL_SECONDS)
+    # Forex free-tier rate limit is tight — cache longer so the desk's kline
+    # poll + watchlist don't blow the 8/min budget.
+    ttl = FOREX_KLINES_TTL_SECONDS if forex else KLINES_TTL_SECONDS
+    await cache.set(key, [c.model_dump(mode="json") for c in candles], ttl)
     return candles

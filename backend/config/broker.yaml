@@ -1,0 +1,13 @@
+# Paper broker constants (ADR-0021). Config over code (invariant 6) — and
+# every value is a money-risk constant pinned by golden tests
+# (tests/test_broker.py); changing one is a documented decision, not an edit.
+
+starting_balance: "10000"        # USDT, Decimal-parsed from string (invariant 3)
+fee_bps_per_side: 10.0           # spot taker tier — charged on entry AND exit
+slippage_bps_per_side: 2.0       # applied against the trader on market fills
+entry_tolerance_pct: "0.5"       # approve fills only within the entry zone ± this
+proposal_ttl_hours: 6            # an intraday plan approved a day later is a different trade
+max_open_per_symbol: 1           # approving into an existing position is refused, not stacked
+monitor_interval_seconds: 60     # deterministic stop/target check cadence
+max_deposit_per_request: "1000000"  # fat-finger guard on paper top-ups, not a risk limit
+max_leverage: 20                 # max leverage on a futures paper order (ADR-0023); spot is 1x

@@ -13,10 +13,12 @@ import DeskTape from "@/components/DeskTape";
 import DeskVerdict from "@/components/DeskVerdict";
 import FearGreedDial from "@/components/FearGreedDial";
 import FullDeskPanel from "@/components/FullDeskPanel";
+import MarketToggle, { type AssetClass } from "@/components/MarketToggle";
 import PipelineMap from "@/components/PipelineMap";
-import PriceChart from "@/components/PriceChart";
+import ChartStage from "@/components/ChartStage";
+import { type TF } from "@/components/SegTabs";
 import SetupShelf from "@/components/SetupShelf";
-import SignalReadout from "@/components/SignalReadout";
+import SourceBadge from "@/components/SourceBadge";
 import Term from "@/components/Term";
 import WatchlistRail from "@/components/WatchlistRail";
 import {
@@ -37,13 +39,16 @@ import { biasKey, trendKey } from "@/lib/terms";
 import { dhakaTime } from "@/lib/time";
 import { useLiveKline } from "@/lib/useLiveKline";
 
-const TFS = ["5m", "15m", "1h", "4h", "1d"] as const;
-type TF = (typeof TFS)[number];
 // The WebSocket stream (P3) is now the primary path for price/chart updates —
 // this poll is a slow safety net (resync if a tab was asleep, WS briefly
 // down) rather than the main data path, hence the relaxed interval.
 const KLINES_MS = 45_000;
+// Forex has no WS, so REST is the price source — but Twelve Data's free tier is
+// 8 req/min, so we poll the "slow lane" (server caches forex klines ~90s and
+// the brief ~180s; polling faster would just blow the budget for stale data).
+const FOREX_KLINES_MS = 60_000;
 const BRIEF_MS = 30_000;
+const FOREX_BRIEF_MS = 180_000; // aligns with the backend forex brief TTL
 const SCAN_MODE_MS = 20_000;
 
 const trendColor = (t?: string) =>
@@ -62,33 +67,6 @@ function Odometer({ text, direction }: { text: string; direction: "up" | "down" 
         </span>
       ))}
     </span>
-  );
-}
-
-function SegTabs({ value, onChange }: { value: TF; onChange: (t: TF) => void }) {
-  const idx = TFS.indexOf(value);
-  return (
-    <div className="relative flex rounded-lg border border-hair bg-abyss/60 p-0.5">
-      <span
-        className="absolute top-0.5 bottom-0.5 left-0.5 rounded-md bg-raised"
-        style={{
-          width: `calc((100% - 4px) / ${TFS.length})`,
-          transform: `translateX(${idx * 100}%)`,
-          transition: "transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1)",
-        }}
-      />
-      {TFS.map((t) => (
-        <button
-          key={t}
-          onClick={() => onChange(t)}
-          className={`relative z-10 w-10 py-1 text-center font-mono text-[11px] transition-colors duration-200 sm:w-12 sm:text-xs ${
-            t === value ? "text-hi" : "text-dim hover:text-mid"
-          }`}
-        >
-          {t}
-        </button>
-      ))}
-    </div>
   );
 }
 
@@ -125,12 +103,53 @@ export default function Home() {
   const [deskData, setDeskData] = useState<DeskPanelResponse | null>(null);
   const [deskRunning, setDeskRunning] = useState(false);
   const [scanMode, setScanMode] = useState<ScannerMode | null>(null);
+  const [assetClass, setAssetClass] = useState<AssetClass>("crypto");
   const prevClose = useRef<number | null>(null);
   const briefSymbol = useRef<string>("");
 
-  // Live price stream (P3) — the primary path; REST above is now the backfill
-  // + slow safety-net poll. `liveTick` updates as fast as trades arrive.
-  const { liveTick, connected: wsConnected } = useLiveKline(symbol, tf);
+  const isForex = assetClass === "forex";
+
+  // Live price stream (P3) — crypto only. Forex has no free real-time WS, so
+  // it relies on the REST poll below (a faster interval to compensate).
+  const { liveTick, connected: wsConnected } = useLiveKline(symbol, tf, !isForex);
+
+  // Restore the last asset class + its last symbol on load; remember the
+  // symbol per class so flipping CRYPTO⇄FOREX returns you to where you were.
+  useEffect(() => {
+    const stored = localStorage.getItem("dp:assetClass");
+    const cls: AssetClass = stored === "forex" ? "forex" : "crypto";
+    const last = localStorage.getItem(`dp:lastSymbol:${cls}`) ?? (cls === "forex" ? "EURUSD" : "BTCUSDT");
+    setAssetClass(cls);
+    setSymbol(last);
+    setDraft(last);
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(`dp:lastSymbol:${assetClass}`, symbol);
+    } catch {
+      /* storage blocked — non-critical */
+    }
+  }, [symbol, assetClass]);
+
+  const switchAsset = useCallback(
+    (cls: AssetClass) => {
+      setAssetClass((cur) => {
+        if (cls === cur) return cur;
+        try {
+          localStorage.setItem("dp:assetClass", cls);
+        } catch {
+          /* non-critical */
+        }
+        const last = localStorage.getItem(`dp:lastSymbol:${cls}`) ?? (cls === "forex" ? "EURUSD" : "BTCUSDT");
+        setSymbol(last);
+        setDraft(last);
+        setTf("1h");
+        return cls;
+      });
+    },
+    [],
+  );
 
   // One Quick Read per symbol (60s server cache); ⟳ forces a fresh run.
   const runQuickRead = useCallback(
@@ -223,9 +242,12 @@ export default function Home() {
     prevClose.current = null;
     setDir("flat");
     pollKlines();
-    const id = setInterval(pollKlines, KLINES_MS);
+    // Crypto refreshes on the live WS; this REST poll is the slow backstop.
+    // Forex has no WS AND a tight free-tier budget, so it polls the slow lane
+    // (the server's ~90s forex kline cache absorbs most of these).
+    const id = setInterval(pollKlines, isForex ? FOREX_KLINES_MS : KLINES_MS);
     return () => clearInterval(id);
-  }, [pollKlines]);
+  }, [pollKlines, isForex]);
 
   // Apply each live tick: same bar → just move the ticker/direction (the
   // chart's own cheap `.update()` path handles the visual, via the `liveTick`
@@ -249,9 +271,9 @@ export default function Home() {
 
   useEffect(() => {
     pollBrief();
-    const id = setInterval(pollBrief, BRIEF_MS);
+    const id = setInterval(pollBrief, isForex ? FOREX_BRIEF_MS : BRIEF_MS);
     return () => clearInterval(id);
-  }, [pollBrief]);
+  }, [pollBrief, isForex]);
 
   // Scanner mode (P3) — read-only mirror of the Settings toggle, so switching
   // to Active there is reflected here without a page reload.
@@ -283,11 +305,12 @@ export default function Home() {
       >
       {/* ── Command bar ── */}
       <header className="flex shrink-0 flex-wrap items-center justify-between gap-x-6 gap-y-2.5 border-b border-hair/80 px-4 py-3 sm:px-6">
-        <div className="flex items-center gap-5">
+        <div className="flex items-center gap-4">
           <div className="flex items-baseline gap-2.5">
             <span className="text-[13px] font-semibold tracking-[0.42em] text-hi">DARKPOOL</span>
             <span className="hidden text-[12px] font-semibold tracking-[0.08em] text-gold sm:inline">desk</span>
           </div>
+          <MarketToggle value={assetClass} onChange={switchAsset} />
           <DeskNav />
         </div>
         <form
@@ -304,7 +327,7 @@ export default function Home() {
             onChange={(e) => setDraft(e.target.value.toUpperCase())}
             spellCheck={false}
             className="w-full flex-1 bg-transparent px-2.5 py-2 font-mono text-sm tracking-wide text-hi outline-none placeholder:text-dim md:w-44 md:flex-none"
-            placeholder="SYMBOL"
+            placeholder={isForex ? "EURUSD" : "SYMBOL"}
             aria-label="symbol"
           />
           <button
@@ -331,11 +354,16 @@ export default function Home() {
       <div className="flex shrink-0 flex-wrap items-end justify-between gap-3 px-4 pt-5 pb-3 sm:px-6">
         <div>
           <div className="micro-label mb-1.5 flex items-center gap-2">
-            {symbol} · spot · binance
-            <span
-              className={`live-dot ${wsConnected ? "bg-pulse" : "bg-raised"}`}
-              title={wsConnected ? "live · websocket" : "reconnecting…"}
-            />
+            {symbol} · spot · {isForex ? "twelve data" : "binance"}
+            <SourceBadge surface="ticker" />
+            {isForex ? (
+              <span className="live-dot bg-warn" title="forex · polled (no free real-time forex stream)" />
+            ) : (
+              <span
+                className={`live-dot ${wsConnected ? "bg-pulse" : "bg-raised"}`}
+                title={wsConnected ? "live · websocket" : "reconnecting…"}
+              />
+            )}
           </div>
           <div className={`font-mono text-4xl font-light leading-none tabular-nums sm:text-5xl ${priceColor}`}>
             {lastClose ? <Odometer text={formatPrice(lastClose)} direction={dir} /> : "— — —"}
@@ -372,39 +400,31 @@ export default function Home() {
         {/* Board rail — watchlist tiles + desk tape. Stacks last on mobile;
             hidden only in the tight lg–xl band to protect chart width. */}
         <aside className="order-3 flex w-full shrink-0 flex-col gap-3.5 lg:hidden xl:order-none xl:flex xl:w-[248px]">
-          <WatchlistRail active={symbol} onSelect={retarget} />
+          <WatchlistRail key={assetClass} active={symbol} onSelect={retarget} assetClass={assetClass} />
           <DeskTape symbol={symbol} />
         </aside>
 
         {/* Center column — chart stage + setups shelf */}
         <div className="order-1 flex min-h-0 min-w-0 flex-1 flex-col gap-4 xl:order-none">
-        {/* Chart gets a fixed, consistent height (no fullscreen stretch); the
-            setups shelf below fills the remaining column space and scrolls. */}
-        <section className="card hud-corners glow-live dp-rise flex h-[380px] min-w-0 flex-col overflow-hidden lg:h-[clamp(360px,50vh,560px)]">
-          <div className="flex items-center justify-between border-b border-hair/70 px-5 py-3">
-            <div className="flex items-center gap-3">
-              <span className="micro-label">price · {tf}</span>
-              {tfa?.structure.last_event && (
-                <span className="chip">
-                  <Term k={tfa.structure.last_event.kind === "BOS" ? "BOS" : "CHOCH"} below>
-                    <span className={tfa.structure.last_event.direction === "bullish" ? "text-bull" : "text-bear"}>
-                      {tfa.structure.last_event.kind}
-                    </span>
-                  </Term>
-                  @ {formatPrice(tfa.structure.last_event.level)}
-                </span>
-              )}
-            </div>
-            <SegTabs value={tf} onChange={setTf} />
-          </div>
-          <SignalReadout tfa={tfa} levels={levels} price={lastClose ? parseFloat(lastClose) : null} />
-          <div className="relative min-h-0 flex-1">
-            <PriceChart candles={candles} levels={levels} lastEvent={tfa?.structure.last_event ?? null} liveTick={liveTick} />
-          </div>
-        </section>
+        {/* Chart stage (ADR-0017) — chart + toolbar (plan overlay, OB/FVG, AI
+            scenario, liquidity jump, refresh). Fixed height; setups fill below. */}
+        <ChartStage
+          symbol={symbol}
+          tf={tf}
+          setTf={setTf}
+          tfa={tfa}
+          levels={levels}
+          candles={candles}
+          liveTick={liveTick}
+          lastClose={lastClose}
+          onRefresh={() => {
+            pollKlines();
+            pollBrief();
+          }}
+        />
 
-        {/* Setup variants across Binance venues (FR-4) */}
-        <SetupShelf symbol={symbol} price={lastClose ? parseFloat(lastClose) : null} />
+        {/* Setup variants — deterministic engine rules (FR-4 v1 · ADR-0019) */}
+        <SetupShelf symbol={symbol} livePrice={lastClose} />
         </div>
 
         {/* Desk rail */}
@@ -422,7 +442,10 @@ export default function Home() {
           {/* Alignment — the engine's verdict moment */}
           <div className={`card dp-rise px-5 py-4 ${hero}`} style={{ animationDelay: "120ms" }}>
             <div className="min-w-0">
-              <Term k="MTF" className="micro-label">mtf alignment · engine</Term>
+              <span className="flex items-center gap-1.5">
+                <Term k="MTF" className="micro-label">mtf alignment · engine</Term>
+                <SourceBadge surface="alignment" />
+              </span>
               <span className="bn-sub mt-0.5">টাইমফ্রেম ঐক্য · সব চার্ট এক দিকে?</span>
             </div>
             {alignment ? (
@@ -463,7 +486,7 @@ export default function Home() {
 
           {/* Structure */}
           <div className="card dp-rise" style={{ animationDelay: "180ms" }}>
-            <CardHeader bn="বাজার কাঠামো">
+            <CardHeader bn="বাজার কাঠামো" right={<SourceBadge surface="structure" />}>
               <Term k="STRUCTURE" below>structure</Term>
             </CardHeader>
             <div className="divide-y divide-hair/50 px-5">
@@ -500,7 +523,7 @@ export default function Home() {
 
           {/* Derivatives */}
           <div className="card dp-rise" style={{ animationDelay: "240ms" }}>
-            <CardHeader bn="ডেরিভেটিভস ডেটা">
+            <CardHeader bn="ডেরিভেটিভস ডেটা" right={<SourceBadge surface="derivatives" />}>
               <Term k="PERP" below>derivatives · usdⓈ-m perp</Term>
             </CardHeader>
             {briefReady?.derivatives ? (
@@ -544,6 +567,11 @@ export default function Home() {
                   </div>
                 </div>
               </div>
+            ) : isForex && briefReady ? (
+              <div className="px-5 py-3.5 text-sm text-dim">
+                n/a — forex spot has no perps
+                <span className="bn-sub mt-0.5 block">স্পট ফরেক্সে ডেরিভেটিভস নেই</span>
+              </div>
             ) : (
               <div className="px-5 py-3.5 text-sm text-dim">{briefReady ? "no futures market" : "calibrating…"}</div>
             )}
@@ -551,12 +579,17 @@ export default function Home() {
 
           {/* Sentiment */}
           <div className="card dp-rise" style={{ animationDelay: "300ms" }}>
-            <CardHeader bn="বাজারের মেজাজ">
+            <CardHeader bn="বাজারের মেজাজ" right={<SourceBadge surface="fear_greed" />}>
               <Term k="FNG" below>sentiment · fear & greed</Term>
             </CardHeader>
             <div className="px-5 py-4">
               {briefReady?.sentiment ? (
                 <FearGreedDial value={briefReady.sentiment.fear_greed} label={briefReady.sentiment.label} />
+              ) : isForex && briefReady ? (
+                <div className="text-sm text-dim">
+                  n/a — crypto-only index
+                  <span className="bn-sub mt-0.5 block">ফিয়ার ও গ্রিড শুধু ক্রিপ্টোতে</span>
+                </div>
               ) : (
                 <div className="text-sm text-dim">calibrating…</div>
               )}
@@ -565,7 +598,7 @@ export default function Home() {
 
           {/* Zones & liquidity */}
           <div className="card dp-rise" style={{ animationDelay: "360ms" }}>
-            <CardHeader bn="জোন ও লিকুইডিটি">
+            <CardHeader bn="জোন ও লিকুইডিটি" right={<SourceBadge surface="structure" />}>
               <Term k="LIQUIDITY" below>zones & liquidity · {tf}</Term>
             </CardHeader>
             <div className="space-y-2.5 px-5 py-4">

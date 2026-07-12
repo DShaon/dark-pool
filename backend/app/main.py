@@ -7,6 +7,7 @@ shutdown; request handlers never construct network clients.
 import asyncio
 import contextlib
 from contextlib import asynccontextmanager
+from decimal import Decimal
 from pathlib import Path
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -18,17 +19,28 @@ from app.adapters.alternative_me import AlternativeMeAdapter
 from app.adapters.binance import BinanceAdapter
 from app.adapters.binance_futures import BinanceFuturesAdapter
 from app.adapters.binance_ws import BinanceStreamHub
+from app.adapters.twelvedata import TwelveDataAdapter
 from app.api.routes_analysis import router as analysis_router
+from app.api.routes_backtest import router as backtest_router
+from app.api.routes_broker import router as broker_router
+from app.api.routes_calibration import router as calibration_router
 from app.api.routes_grading import router as grading_router
 from app.api.routes_market import router as market_router
+from app.api.routes_models import router as models_router
 from app.api.routes_monitor import router as monitor_router
 from app.api.routes_ws import router as ws_router
+from app.broker.paper import PaperBroker, load_broker_config
 from app.config import get_settings
 from app.core.cache import build_cache
+from app.desk.calibration import CalibrationStore
 from app.desk.factory import build_desk
+from app.desk.lessons import LessonsStore
+from app.desk.roster import RosterStore
 from app.monitor.alerts import load_thresholds
 from app.monitor.scanner import Scanner
 from app.monitor.state import FeedStore, ModeStore, WatchlistStore
+from app.quant.backtest import load_backtest_config
+from app.quant.backtest_service import BacktestRunner, BacktestStore
 from app.quant.brief import BriefComposer
 from app.quant.grading_service import GradingService
 
@@ -40,19 +52,58 @@ async def lifespan(app: FastAPI):
     app.state.binance = BinanceAdapter(base_url=settings.binance_data_base)
     app.state.binance_futures = BinanceFuturesAdapter()
     app.state.sentiment = AlternativeMeAdapter()
+    # Forex OHLCV (P4) — "demo" key serves EUR/USD; a free key unlocks the rest.
+    app.state.forex = TwelveDataAdapter(api_key=settings.twelve_data_api_key)
     app.state.brief_composer = BriefComposer(
         spot=app.state.binance,
         futures=app.state.binance_futures,
         sentiment=app.state.sentiment,
+        forex=app.state.forex,
     )
     # LLM gateway + Quick Read (tier 1) + analyst panel (tier 2). Each is None
     # when its provider key / config is absent — the matching route then answers
     # 503 and the rest of the API is unaffected (NFR-3).
-    app.state.llm_gateway, app.state.quick_read, app.state.analyst_panel = build_desk(settings)
+    (
+        app.state.llm_gateway,
+        app.state.quick_read,
+        app.state.analyst_panel,
+        app.state.cio,
+        app.state.scenario,
+    ) = build_desk(settings)
+    # User-managed model roster (ADR-0016). The /models routes mutate this store
+    # then rebuild the desk in place — keys live only in this gitignored file.
+    app.state.roster_store = RosterStore(Path(settings.roster_config_path))
+    # Confidence recalibration (ADR-0018): graded outcomes -> seat weights +
+    # blend refit. /plan reads params fresh per run; POST /outcomes appends.
+    app.state.calibration_store = CalibrationStore(
+        Path(settings.data_dir) / "calibration.json"
+    )
+    # Trade lessons (ADR-0019): failure post-mortems + per-variant performance;
+    # the digest rides the CIO's synthesis input so the desk reads its history.
+    app.state.lessons_store = LessonsStore(Path(settings.data_dir) / "lessons.json")
     # Alert thresholds (P3) — config over code; defaults if the file is absent.
     app.state.alert_thresholds = load_thresholds(settings.alerts_config_path)
     # Outcome grading (P3 · FR-6) — deterministic TP/SL check, no AI.
     app.state.grading_service = GradingService(app.state.binance)
+    # Walk-forward backtesting (P5 · ADR-0020) — replays the production setup
+    # pipeline over history; one job at a time, report stored per symbol.
+    app.state.backtest_store = BacktestStore(Path(settings.data_dir) / "backtests.json")
+    app.state.backtest = BacktestRunner(
+        app.state.binance,
+        app.state.backtest_store,
+        load_backtest_config(settings.backtest_config_path),
+    )
+    # Paper broker (P5 · ADR-0021) — the approval-gated execution seam.
+    # approve/reject exist ONLY on the authenticated /broker routes (the UI);
+    # the MCP surface can propose and read, never fill (the gate is structural).
+    app.state.broker = PaperBroker(
+        path=Path(settings.data_dir) / "paper_broker.json",
+        config=load_broker_config(settings.broker_config_path),
+        spot=app.state.binance,
+        grading=app.state.grading_service,
+        risk_pct_default=Decimal(str(settings.risk_pct_per_trade)),
+        max_position_pct=Decimal(str(settings.max_position_pct)),
+    )
 
     # Background scanner (P3 · FR-5): file-backed mode/watchlist/feed stores +
     # an APScheduler tick. "manual" mode (the default) makes every tick a
@@ -78,6 +129,15 @@ async def lifespan(app: FastAPI):
         id="scanner_tick",
         max_instances=1,  # a slow tick must finish before the next one starts
     )
+    # Paper positions close deterministically (stop/target candle-walk) on
+    # their own cadence — a no-op when nothing is open (ADR-0021 §6).
+    scheduler.add_job(
+        app.state.broker.monitor_tick,
+        "interval",
+        seconds=app.state.broker.config.monitor_interval_seconds,
+        id="broker_monitor_tick",
+        max_instances=1,
+    )
     scheduler.start()
     app.state.scheduler = scheduler
 
@@ -97,6 +157,7 @@ async def lifespan(app: FastAPI):
         await app.state.binance.aclose()
         await app.state.binance_futures.aclose()
         await app.state.sentiment.aclose()
+        await app.state.forex.aclose()
         if app.state.llm_gateway is not None:
             await app.state.llm_gateway.aclose()
         await app.state.cache.aclose()
@@ -116,6 +177,10 @@ def create_app() -> FastAPI:
     app.include_router(monitor_router)
     app.include_router(grading_router)
     app.include_router(ws_router)
+    app.include_router(models_router)
+    app.include_router(calibration_router)
+    app.include_router(backtest_router)
+    app.include_router(broker_router)
     return app
 
 

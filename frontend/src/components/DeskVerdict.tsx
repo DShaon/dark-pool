@@ -14,6 +14,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import SampleTag from "@/components/SampleTag";
+import SourceBadge from "@/components/SourceBadge";
 import Term from "@/components/Term";
 import { formatPrice, type QuickReadResponse } from "@/lib/api";
 import type { GlossaryKey } from "@/lib/glossary";
@@ -200,6 +201,7 @@ export default function DeskVerdict({
           <Term k="QUICK_READ" below className="micro-label">
             <span style={{ color: "var(--ai-gold)", opacity: 0.9 }}>desk verdict · quick read</span>
           </Term>
+          <SourceBadge surface="quickread" detail={data?.model_id ?? null} />
           <span className="bn-sub">ডেস্কের রায়</span>
         </span>
         <div className="flex items-center gap-2.5">

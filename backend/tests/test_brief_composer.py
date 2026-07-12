@@ -57,6 +57,19 @@ class FakeSentiment:
         return 25, "Extreme Fear"
 
 
+class FakeForex:
+    """Forex symbol: OHLCV only (zero volume, like real forex), no
+    futures/sentiment concept at all."""
+
+    async def get_klines(self, symbol: str, interval: str = "1h", limit: int = 100,
+                         start_time=None, end_time=None):
+        steps = {"5m": 1, "15m": 1, "1h": 1, "4h": 4, "1d": 24}
+        return [
+            c.model_copy(update={"volume": Decimal("0")})
+            for c in series(min(limit, 60), steps[interval])
+        ]
+
+
 async def test_compose_degrades_gracefully_and_round_trips():
     composer = BriefComposer(FakeSpot(), FakeFuturesDown(), FakeSentiment())  # type: ignore[arg-type]
     brief = await composer.compose("btcusdt")
@@ -76,3 +89,30 @@ async def test_compose_degrades_gracefully_and_round_trips():
     restored = MarketBrief.model_validate(brief.model_dump(mode="json"))
     assert restored.symbol == brief.symbol
     assert restored.timeframes["1h"].last_close == brief.timeframes["1h"].last_close
+
+
+async def test_forex_symbol_uses_forex_path_full_smc_no_derivatives():
+    composer = BriefComposer(
+        FakeSpot(), FakeFuturesDown(), FakeSentiment(), forex=FakeForex()  # type: ignore[arg-type]
+    )
+    brief = await composer.compose("eurusd")
+
+    assert brief.symbol == "EURUSD"
+    # full SMC/structure parity — same engine, all 5 timeframes analyzed
+    assert set(brief.timeframes) == {"5m", "15m", "1h", "4h", "1d"}
+    assert set(brief.alignment.per_tf) == {"15m", "1h", "4h"}
+    assert brief.daily_levels, "daily levels expected on forex too"
+    # crypto-only context is absent (not a failure — a clean gap)
+    assert brief.derivatives is None
+    assert brief.sentiment is None
+    assert any("forex" in g.lower() for g in brief.gaps)
+    # forex candles carry no volume → VWAP off, not crashed
+    assert brief.timeframes["1h"].indicators.vwap is None
+
+
+async def test_forex_without_adapter_raises():
+    import pytest
+
+    composer = BriefComposer(FakeSpot(), FakeFuturesDown(), FakeSentiment())  # type: ignore[arg-type]
+    with pytest.raises(AdapterError):
+        await composer.compose("EURUSD")

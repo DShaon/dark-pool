@@ -10,6 +10,8 @@
 export type Outcome = "open" | "tp" | "sl" | "invalidated";
 export type Direction = "long" | "short" | "no_trade";
 
+export type SeatVoteJ = { direction: Direction; conviction: number };
+
 export type JournalTrade = {
   id: string;
   savedAt: string; // ISO UTC
@@ -22,8 +24,23 @@ export type JournalTrade = {
   target: string | null; // TP1
   targetRR: number | null; // planned R:R to TP1
   thesis: string;
-  source: "quick_read" | "manual";
+  source: "quick_read" | "manual" | "cio" | "setup";
   outcome: Outcome;
+  // CIO-plan provenance (ADR-0018) — carried so a graded outcome can be
+  // reported to /outcomes and feed recalibration. Absent on older trades.
+  confidence?: number | null; // as published
+  checklist?: number | null; // the two formula halves, as published
+  agreement?: number | null;
+  seatVotes?: Record<string, SeatVoteJ> | null;
+  calPosted?: boolean; // outcome already reported to the backend
+  // Lessons loop (ADR-0019). `variant` = setup key when source === "setup";
+  // `closedAt` is stamped at grade time and is the stable idempotency key for
+  // /lessons (re-posting a refined post-mortem UPDATES, never duplicates).
+  variant?: string | null;
+  closedAt?: string | null;
+  failureTags?: string[];
+  failureNote?: string;
+  lessonPosted?: boolean;
 };
 
 export type NewTrade = Omit<JournalTrade, "id" | "savedAt" | "outcome">;
@@ -73,6 +90,18 @@ export function addTrade(t: NewTrade): JournalTrade[] {
 
 export function setOutcome(id: string, outcome: Outcome): JournalTrade[] {
   return persist(loadJournal().map((t) => (t.id === id ? { ...t, outcome } : t)));
+}
+
+/** Mark a trade's outcome as reported to /outcomes (ADR-0018) so a page
+ *  reload never double-posts (the backend is idempotent too — belt and braces). */
+export function markCalPosted(id: string): JournalTrade[] {
+  return persist(loadJournal().map((t) => (t.id === id ? { ...t, calPosted: true } : t)));
+}
+
+/** Merge lessons-loop fields (closedAt stamp, post-mortem, posted flag) onto a
+ *  trade (ADR-0019). */
+export function patchTrade(id: string, patch: Partial<JournalTrade>): JournalTrade[] {
+  return persist(loadJournal().map((t) => (t.id === id ? { ...t, ...patch } : t)));
 }
 
 export function removeTrade(id: string): JournalTrade[] {

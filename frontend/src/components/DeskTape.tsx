@@ -12,6 +12,7 @@
 
 import { memo, useEffect, useRef, useState } from "react";
 
+import SourceBadge from "@/components/SourceBadge";
 import Term from "@/components/Term";
 import { fetchAlerts, type AlertEvent, type AlertTone } from "@/lib/api";
 import { dhakaTime } from "@/lib/time";
@@ -88,7 +89,10 @@ function DeskTape({ symbol }: { symbol: string }) {
       )}
       <div className="flex items-start justify-between gap-2 border-b border-hair/70 px-4 py-2.5">
         <span className="min-w-0">
-          <Term k="DESK_TAPE" className="micro-label block">desk tape</Term>
+          <span className="flex items-center gap-1.5">
+            <Term k="DESK_TAPE" className="micro-label block">desk tape</Term>
+            <SourceBadge surface="tape" />
+          </span>
           <span className="bn-sub mt-0.5">ঘটনাপ্রবাহ · লাইভ</span>
         </span>
         <span className="flex shrink-0 items-center gap-2">

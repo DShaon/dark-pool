@@ -10,7 +10,13 @@ records the decision; it never fabricates a verdict.
     Register CC:   claude mcp add darkpool -- <backend>/.venv/Scripts/python.exe -m app.mcp.server
 
 Tools: desk_health · get_market_brief · quick_read · run_full_desk ·
-       save_trade_plan · list_trade_plans.
+       save_trade_plan · list_trade_plans · propose_order · list_proposals ·
+       get_paper_account.
+
+Execution note (ADR-0021): this server can PROPOSE paper orders and read the
+paper account — it has NO approve capability, by design. Approval exists only
+on the authenticated web UI. The gate is structural: a capability an agent
+does not have cannot be prompt-injected away.
 """
 
 from __future__ import annotations
@@ -18,18 +24,23 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from decimal import Decimal, InvalidOperation
+
 from mcp.server.fastmcp import FastMCP
 
 from app.adapters.alternative_me import AlternativeMeAdapter
 from app.adapters.base import AdapterError
 from app.adapters.binance import BinanceAdapter
 from app.adapters.binance_futures import BinanceFuturesAdapter
+from app.broker.paper import PaperBroker, load_broker_config
 from app.config import get_settings
 from app.core.llm import LLMError
 from app.desk.factory import build_desk
 from app.desk.plan_store import CioPlan, PlanStore, Target
 from app.desk.quick_read import QuickReadError
+from app.models.broker import ProposalIn
 from app.quant.brief import BriefComposer
+from app.quant.grading_service import GradingService
 
 _SYMBOL_RE = re.compile(r"^[A-Z0-9]{5,20}$")
 
@@ -39,8 +50,18 @@ _spot = BinanceAdapter(base_url=_settings.binance_data_base)
 _futures = BinanceFuturesAdapter()
 _sentiment = AlternativeMeAdapter()
 _composer = BriefComposer(spot=_spot, futures=_futures, sentiment=_sentiment)
-_gateway, _quick_read, _panel = build_desk(_settings)
+_gateway, _quick_read, _panel, _cio, _scenario = build_desk(_settings)
 _store = PlanStore(Path(_settings.data_dir) / "trade_plans.json")
+# Paper broker (ADR-0021) — SAME file store as the HTTP app, so a proposal made
+# here appears in the web UI for the owner's approve/reject click.
+_broker = PaperBroker(
+    path=Path(_settings.data_dir) / "paper_broker.json",
+    config=load_broker_config(_settings.broker_config_path),
+    spot=_spot,
+    grading=GradingService(_spot),
+    risk_pct_default=Decimal(str(_settings.risk_pct_per_trade)),
+    max_position_pct=Decimal(str(_settings.max_position_pct)),
+)
 
 mcp = FastMCP("darkpool")
 
@@ -151,6 +172,62 @@ def save_trade_plan(
 def list_trade_plans(symbol: str | None = None, limit: int = 20) -> list[dict]:
     """Recent CIO plans (newest first), optionally filtered by symbol."""
     return _store.list(symbol.upper() if symbol else None, limit)
+
+
+@mcp.tool()
+def propose_order(
+    symbol: str,
+    direction: str,
+    entry_low: str,
+    entry_high: str,
+    stop: str,
+    targets: list[str],
+    thesis: str,
+    risk_pct: str | None = None,
+) -> dict:
+    """Submit a PAPER order proposal for the owner to approve or reject in the
+    web UI (journal page). Nothing fills here: this tool has no approval power
+    (ADR-0021 — the gate is structural). Prices are strings, e.g. "64500".
+    The proposal expires unapproved after a few hours; geometry must be
+    coherent (stop on the losing side, first target on the winning side)."""
+    try:
+        intent = ProposalIn(
+            symbol=_sym(symbol),
+            direction=direction,  # schema validates long|short
+            entry_low=Decimal(entry_low),
+            entry_high=Decimal(entry_high),
+            stop=Decimal(stop),
+            targets=[Decimal(t) for t in targets],
+            risk_pct=Decimal(risk_pct) if risk_pct else None,
+            thesis=thesis,
+        )
+        proposal = _broker.propose(intent, source="mcp")
+    except (ValueError, InvalidOperation) as exc:
+        return {"error": str(exc)[:400]}
+    return {
+        "status": "pending_owner_approval",
+        "proposal": proposal.model_dump(mode="json"),
+        "note": "the owner must approve this in the web UI before any paper fill",
+    }
+
+
+@mcp.tool()
+def list_proposals(status: str | None = None) -> list[dict]:
+    """Paper order proposals (newest first): pending / filled / rejected /
+    expired. Read-only."""
+    return [p.model_dump(mode="json") for p in _broker.list_proposals(status)]
+
+
+@mcp.tool()
+async def get_paper_account() -> dict:
+    """Paper account state: balance, equity (live-priced), open/closed
+    positions, pending proposals. Read-only."""
+    view = await _broker.account()
+    positions = _broker.positions()
+    return {
+        "account": view.model_dump(mode="json"),
+        "positions": [x.model_dump(mode="json") for x in positions[:20]],
+    }
 
 
 def main() -> None:

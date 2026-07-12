@@ -3,6 +3,11 @@
 Required: spot klines on 15m/1h/4h (failure = AdapterError up to the route).
 Optional: daily levels, derivatives, sentiment — each failure degrades into an
 entry in `gaps` instead of failing the run (NFR-3).
+
+Asset-class aware (P4): a forex symbol (EURUSD) is fetched from Twelve Data and
+run through the SAME quant engine as crypto — full SMC/structure/TA parity. The
+crypto-only context (funding/OI/L-S, Fear & Greed) is simply absent for forex
+and noted in `gaps`; forex's own context (DXY, COT, sessions) lands in later P4.
 """
 
 import asyncio
@@ -12,6 +17,8 @@ from app.adapters.alternative_me import AlternativeMeAdapter
 from app.adapters.base import AdapterError
 from app.adapters.binance import BinanceAdapter
 from app.adapters.binance_futures import BinanceFuturesAdapter
+from app.adapters.twelvedata import TwelveDataAdapter
+from app.markets import asset_class
 from app.models.brief import (
     AlignmentOut,
     DerivativesOut,
@@ -146,13 +153,61 @@ class BriefComposer:
         spot: BinanceAdapter,
         futures: BinanceFuturesAdapter,
         sentiment: AlternativeMeAdapter,
+        forex: TwelveDataAdapter | None = None,
     ) -> None:
         self._spot = spot
         self._futures = futures
         self._sentiment = sentiment
+        self._forex = forex
 
     async def compose(self, symbol: str) -> MarketBrief:
         symbol = symbol.upper()
+        if asset_class(symbol) == "forex":
+            return await self._compose_forex(symbol)
+        return await self._compose_crypto(symbol)
+
+    async def _compose_forex(self, symbol: str) -> MarketBrief:
+        """Forex path: OHLCV from Twelve Data → the same engine. No derivatives
+        or Fear & Greed (crypto-only); those become `gaps`, not failures."""
+        if self._forex is None:
+            raise AdapterError("twelvedata", "no forex data source configured")
+        gaps: list[str] = []
+
+        series = await asyncio.gather(
+            *(self._forex.get_klines(symbol, tf, KLINE_LIMIT) for tf in TIMEFRAMES)
+        )
+        raw = dict(zip(TIMEFRAMES, series))
+        timeframes = {tf: analyze_timeframe(tf, candles) for tf, candles in raw.items()}
+
+        daily_levels: list[LevelOut] = []
+        try:
+            daily = await self._forex.get_klines(symbol, "1d", 10)
+            daily_levels = [
+                LevelOut(kind=lv.kind, price=lv.price, state=lv.state)
+                for lv in daily_weekly_levels(daily, raw["15m"])
+            ]
+        except AdapterError as exc:
+            gaps.append(f"daily_levels unavailable: {_why(exc)}")
+
+        gaps.append("derivatives: n/a for forex spot (funding/OI/L-S are crypto-only)")
+        gaps.append("fear_greed: crypto-only sentiment index; forex n/a")
+        gaps.append("volume: forex is decentralized — no consolidated volume (VWAP off)")
+        gaps.append("dxy / cot / session-context: scheduled with later P4")
+
+        return MarketBrief(
+            symbol=symbol,
+            generated_at=datetime.now(timezone.utc),
+            timeframes=timeframes,
+            daily_levels=daily_levels,
+            derivatives=None,
+            sentiment=None,
+            alignment=compute_alignment(
+                {tf: timeframes[tf] for tf in ALIGNMENT_TIMEFRAMES}
+            ),
+            gaps=gaps,
+        )
+
+    async def _compose_crypto(self, symbol: str) -> MarketBrief:
         gaps: list[str] = []
 
         series = await asyncio.gather(

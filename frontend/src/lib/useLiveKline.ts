@@ -21,7 +21,7 @@ function wsUrl(symbol: string, interval: string): string {
   return `${base}/ws/kline/${symbol}/${interval}`;
 }
 
-export function useLiveKline(symbol: string, interval: string) {
+export function useLiveKline(symbol: string, interval: string, enabled = true) {
   const [liveTick, setLiveTick] = useState<Kline | null>(null);
   const [connected, setConnected] = useState(false);
 
@@ -32,6 +32,10 @@ export function useLiveKline(symbol: string, interval: string) {
 
     setLiveTick(null); // a new symbol/interval starts with no live tick yet
     setConnected(false);
+
+    // Disabled (e.g. forex — no free real-time forex WS): the caller's REST
+    // poll is the price source instead. Never open the crypto stream for it.
+    if (!enabled) return;
 
     const connect = () => {
       if (closedByEffect) return;
@@ -63,7 +67,7 @@ export function useLiveKline(symbol: string, interval: string) {
       if (reconnectTimer) clearTimeout(reconnectTimer);
       socket?.close();
     };
-  }, [symbol, interval]);
+  }, [symbol, interval, enabled]);
 
   return { liveTick, connected };
 }

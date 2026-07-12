@@ -10,18 +10,11 @@
 
 import { useEffect, useState } from "react";
 
+import ModelDesk from "@/components/ModelDesk";
 import SiteHeader from "@/components/SiteHeader";
 import { fetchScannerMode, setScannerMode, type ScannerMode } from "@/lib/api";
 
 const RISK_PRESETS = ["0.5", "1.0", "1.5", "2.0"] as const;
-
-const ROSTER = [
-  { seat: "TREND", model: "deepseek-v3 · openrouter", gold: false },
-  { seat: "CONTRARIAN", model: "llama-3.3-70b · groq", gold: false },
-  { seat: "DERIVATIVES", model: "qwen2.5-72b · openrouter", gold: false },
-  { seat: "RISK OFFICER", model: "gemini-2.0-flash · google", gold: false },
-  { seat: "CIO · SYNTHESIS", model: "claude · interactive via MCP", gold: true },
-];
 
 const PROVIDERS: Array<{ name: string; scope: string; state: "live" | "key needed" }> = [
   { name: "binance spot + futures", scope: "ohlcv · funding · oi · l/s", state: "live" },
@@ -166,24 +159,8 @@ export default function SettingsPage() {
             </p>
           </SectionCard>
 
-          {/* Roster */}
-          <SectionCard title="model roster · models.yaml" delay={180} gold>
-            <div className="space-y-2.5">
-              {ROSTER.map((r) => (
-                <div key={r.seat} className="flex items-center text-[11.5px]">
-                  <span className="w-[118px] shrink-0 font-mono text-[10px] tracking-[0.1em] text-mid">
-                    {r.seat}
-                  </span>
-                  <span className="leader" />
-                  <span className={`font-mono ${r.gold ? "text-gold" : "text-hi"}`}>{r.model}</span>
-                </div>
-              ))}
-            </div>
-            <p className="mt-3 text-[11px] leading-snug text-dim">
-              Any seat swaps to any LiteLLM-routable model — one YAML line, zero code
-              (ADR-0004). Gold seat = the desk&apos;s judgment voice.
-            </p>
-          </SectionCard>
+          {/* Roster — REAL: live provider/role manager (ADR-0016) */}
+          <ModelDesk />
 
           {/* Providers */}
           <SectionCard title="data providers · providers.yaml" delay={240}>
