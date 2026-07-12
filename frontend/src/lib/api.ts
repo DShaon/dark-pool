@@ -3,7 +3,13 @@
  *  float analytics arrive as numbers. We never do arithmetic on price strings —
  *  parseFloat happens only at the chart/display boundary. */
 
-export const API = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
+// Trimmed + BOM-stripped: a stray invisible byte-order-mark from copy-pasting
+// the env var value (e.g. via Notepad) turns "https://host" into an invalid
+// URL that silently resolves as a relative path — every request 404s against
+// the frontend's own origin instead of the backend. Guard it here once.
+export const API = (process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000")
+  .replace(/^﻿/, "")
+  .trim();
 
 // Shared-secret bearer token (single-user v1, ADR-0009). Unset in dev — the
 // backend's require_auth is a no-op when API_TOKEN is empty. Set both
