@@ -5,6 +5,15 @@
 
 export const API = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
 
+// Shared-secret bearer token (single-user v1, ADR-0009). Unset in dev — the
+// backend's require_auth is a no-op when API_TOKEN is empty. Set both
+// NEXT_PUBLIC_API_TOKEN (frontend) and API_TOKEN (backend) to the SAME
+// value once deployed publicly, so a stranger with the URL can't burn your
+// LLM quota or place paper trades.
+const AUTH_HEADERS: HeadersInit = process.env.NEXT_PUBLIC_API_TOKEN
+  ? { Authorization: `Bearer ${process.env.NEXT_PUBLIC_API_TOKEN}` }
+  : {};
+
 export type Kline = {
   open_time: string;
   open: string;
@@ -190,7 +199,7 @@ export type TradePlanResponse = {
 };
 
 async function get<T>(path: string): Promise<T> {
-  const res = await fetch(`${API}${path}`, { cache: "no-store" });
+  const res = await fetch(`${API}${path}`, { cache: "no-store", headers: AUTH_HEADERS });
   if (!res.ok) throw new Error(`backend HTTP ${res.status}`);
   return res.json() as Promise<T>;
 }
@@ -198,7 +207,7 @@ async function get<T>(path: string): Promise<T> {
 async function post<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(`${API}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...AUTH_HEADERS },
     body: JSON.stringify(body),
   });
   if (!res.ok) {
@@ -215,7 +224,7 @@ async function post<T>(path: string, body: unknown): Promise<T> {
 }
 
 async function del<T>(path: string): Promise<T> {
-  const res = await fetch(`${API}${path}`, { method: "DELETE" });
+  const res = await fetch(`${API}${path}`, { method: "DELETE", headers: AUTH_HEADERS });
   if (!res.ok) {
     let detail = `backend HTTP ${res.status}`;
     try {

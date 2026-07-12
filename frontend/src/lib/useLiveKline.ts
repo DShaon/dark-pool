@@ -18,7 +18,9 @@ const RECONNECT_MS = 2000;
 
 function wsUrl(symbol: string, interval: string): string {
   const base = API.replace(/^http/, "ws");
-  return `${base}/ws/kline/${symbol}/${interval}`;
+  const token = process.env.NEXT_PUBLIC_API_TOKEN;
+  const qs = token ? `?token=${encodeURIComponent(token)}` : "";
+  return `${base}/ws/kline/${symbol}/${interval}${qs}`;
 }
 
 export function useLiveKline(symbol: string, interval: string, enabled = true) {
